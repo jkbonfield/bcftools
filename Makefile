@@ -45,7 +45,7 @@ OBJS     = main.o vcfindex.o tabix.o \
            vcfstats.o vcfisec.o vcfmerge.o vcfquery.o vcffilter.o filter.o vcfsom.o \
            vcfnorm.o vcfgtcheck.o vcfview.o vcfannotate.o vcfroh.o vcfconcat.o \
            vcfcall.o mcall.o vcmp.o gvcf.o reheader.o convert.o vcfconvert.o tsv2vcf.o \
-           vcfcnv.o HMM.o vcfplugin.o consensus.o ploidy.o version.o \
+           vcfcnv.o HMM.o vcfplugin.o consensus.o ploidy.o hclust.o version.o \
            ccall.o em.o prob1.o kmin.o # the original samtools calling
 
 EXTRA_CPPFLAGS = -I. -I$(HTSDIR) -DPLUGINPATH=\"$(pluginpath)\"
@@ -146,7 +146,7 @@ vcfcall.o: vcfcall.c $(htslib_vcf_h) $(HTSDIR)/htslib/kfunc.h $(htslib_synced_bc
 vcfconcat.o: vcfconcat.c $(htslib_vcf_h) $(htslib_synced_bcf_reader_h) $(HTSDIR)/htslib/kseq.h $(htslib_bgzf_h) $(htslib_tbx_h) $(bcftools_h)
 vcfconvert.o: vcfconvert.c $(htslib_vcf_h) $(htslib_bgzf_h) $(htslib_synced_bcf_reader_h) $(htslib_vcfutils_h) $(bcftools_h) $(filter_h) $(convert_h) $(tsv2vcf_h)
 vcffilter.o: vcffilter.c $(htslib_vcf_h) $(htslib_synced_bcf_reader_h) $(htslib_vcfutils_h) $(bcftools_h) $(filter_h) rbuf.h
-vcfgtcheck.o: vcfgtcheck.c $(htslib_vcf_h) $(htslib_synced_bcf_reader_h) $(htslib_vcfutils_h) $(bcftools_h)
+vcfgtcheck.o: vcfgtcheck.c $(htslib_vcf_h) $(htslib_synced_bcf_reader_h) $(htslib_vcfutils_h) $(bcftools_h) hclust.h
 vcfindex.o: vcfindex.c $(htslib_vcf_h) $(htslib_tbx_h)
 vcfisec.o: vcfisec.c $(htslib_vcf_h) $(htslib_synced_bcf_reader_h) $(htslib_vcfutils_h) $(bcftools_h) $(filter_h)
 vcfmerge.o: vcfmerge.c $(htslib_vcf_h) $(htslib_synced_bcf_reader_h) $(htslib_vcfutils_h) $(bcftools_h) vcmp.h $(HTSDIR)/htslib/khash.h
@@ -174,6 +174,7 @@ polysomy.o: polysomy.c $(htslib_vcf_h) $(htslib_synced_bcf_reader_h) $(bcftools_
 peakfit.o: peakfit.c peakfit.h $(htslib_hts_h) $(HTSDIR)/htslib/kstring.h
 consensus.o: consensus.c $(htslib_hts_h) $(HTSDIR)/htslib/kseq.h rbuf.h $(bcftools_h) $(HTSDIR)/htslib/regidx.h
 version.o: version.h version.c
+hclust.o: hclust.c hclust.h
 
 test/test-rbuf.o: test/test-rbuf.c rbuf.h
 
