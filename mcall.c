@@ -1396,11 +1396,13 @@ int mcall(call_t *call, bcf1_t *rec)
 
     // Get the genotype likelihoods
     call->nPLs = bcf_get_format_int32(call->hdr, rec, "PL", &call->PLs, &call->mPLs);
-    if ( call->nPLs!=nsmpl*nals*(nals+1)/2 && call->nPLs!=nsmpl*nals )  // a mixture of diploid and haploid or haploid only
+    int ngts = nals*(nals+1)/2;
+    if ( (call->nPLs!=nsmpl*nals*(nals+1)/2 && call->nPLs!=nsmpl*nals) // a mixture of diploid and haploid or haploid only
+         || (call->nPLs < ngts) )
+
         error("Wrong number of PL fields? nals=%d npl=%d\n", nals,call->nPLs);
 
     // Convert PLs to probabilities
-    int ngts = nals*(nals+1)/2;
     hts_expand(double, call->nPLs, call->npdg, call->pdg);
     set_pdg(call->pl2p, call->PLs, call->pdg, nsmpl, ngts, unseen);
 

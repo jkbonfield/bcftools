@@ -547,6 +547,8 @@ static int parse_format_flag(const char *str)
 
 static void set_ploidy(args_t *args, bcf1_t *rec)
 {
+    if (rec->rid >= args->aux.hdr->n[BCF_DT_CTG])
+        exit(1);
     ploidy_query(args->ploidy,(char*)bcf_seqname(args->aux.hdr,rec),rec->pos,args->sex2ploidy,NULL,NULL);
 
     int i;
@@ -810,6 +812,8 @@ int main_vcfcall(int argc, char *argv[])
     while ( bcf_sr_next_line(args.aux.srs) )
     {
         bcf1_t *bcf_rec = args.aux.srs->readers[0].buffer[0];
+        if ( !bcf_rec->d.allele )
+            error("BCF record with no alleles\n");
         if ( args.samples_map ) bcf_subset(args.aux.hdr, bcf_rec, args.nsamples, args.samples_map);
         bcf_unpack(bcf_rec, BCF_UN_STR);
 
