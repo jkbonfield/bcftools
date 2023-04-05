@@ -49,4 +49,4 @@ test_script:
   - set HOME=.
   - set MSYSTEM=MINGW64
   - set PATH=C:/msys64/usr/bin;C:/msys64/mingw64/bin;%APPVEYOR_BUILD_FOLDER%/htslib;%PATH%
-  - "sh -lc \"MSYS2_ARG_CONV_EXCL=* make test-plugins\""
+  - "sh -lc \"TEST_OPTS='-t test.out' make test-plugins\""
