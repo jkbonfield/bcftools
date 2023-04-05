@@ -1791,8 +1791,8 @@ sub test_naive_concat
 
     for my $file (@files)
     {
-        cmd("$$opts{bin}/bcftools view -Ob -o $file.bcf $file.vcf");
-        cmd("$$opts{bin}/bcftools view -Oz -o $file.vcf.gz $file.vcf");
+        cmd("$$opts{bin}/bcftools view --no-version -Ob -o $file.bcf $file.vcf");
+        cmd("$$opts{bin}/bcftools view --no-version -Oz -o $file.vcf.gz $file.vcf");
     }
 
     my $bcfs = join('.bcf ',@files).'.bcf';
