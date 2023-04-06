@@ -1749,7 +1749,7 @@ sub test_naive_concat
 {
     my ($opts,%args) = @_;
 
-    my $seed = srand();
+    my $seed = srand(3434840604);
     print STDERR "Random seed for test_naive_concat: $seed\n";
 
     my @hdr  = ();
@@ -1791,11 +1791,15 @@ sub test_naive_concat
 
     for my $file (@files)
     {
-        cmd("$$opts{bin}/bcftools view -Ob -o $file.bcf $file.vcf");
+        my ($ret,$out,$err) = _cmd3("$$opts{bin}/bcftools view -Ob -o $file.bcf $file.vcf");
+	print "$out";
+        print "bcftools view -Ob fail\n" if ($ret);
+        print "ERROR: $ret // $err" if $err ne "";
         cmd("$$opts{bin}/bcftools view -Oz -o $file.vcf.gz $file.vcf");
     }
 
     my $bcfs = join('.bcf ',@files).'.bcf';
+    print cmd("ls -l $bcfs");
     test_cmd($opts,exp=>$exp,out=>"concat.naive.bcf.out",cmd=>"$$opts{bin}/bcftools concat --naive-force $bcfs | $$opts{bin}/bcftools view -H");
 
     my $vcfs = join('.vcf.gz ',@files).'.vcf.gz';

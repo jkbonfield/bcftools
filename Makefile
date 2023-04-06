@@ -300,14 +300,16 @@ csq.o: csq.c $(htslib_hts_h) $(htslib_vcf_h) $(htslib_synced_bcf_reader_h) $(hts
 # If using MSYS, avoid poor shell expansion via:
 #    MSYS2_ARG_CONV_EXCL="*" make check
 check test-no-plugins: $(PROGRAMS) $(TEST_PROGRAMS) $(BGZIP) $(TABIX)
-	./test/test-rbuf
-	./test/test-regidx
-	REF_PATH=: ./test/test.pl --exec bgzip=$(BGZIP) --exec tabix=$(TABIX) --htsdir=$(HTSDIR) $${TEST_OPTS:-}
+	cat /proc/version
+	#./test/test-rbuf
+	#./test/test-regidx
+	REF_PATH=: ./test/test.pl --exec bgzip=$(BGZIP) --exec tabix=$(TABIX) --htsdir=$(HTSDIR) $${TEST_OPTS:-} -f test_naive_concat
 
 check-plugins test-plugins: $(PROGRAMS) $(TEST_PROGRAMS) $(BGZIP) $(TABIX) plugins
-	./test/test-rbuf
-	./test/test-regidx
-	REF_PATH=: ./test/test.pl --plugins --exec bgzip=$(BGZIP) --exec tabix=$(TABIX) --htsdir=$(HTSDIR) $${TEST_OPTS:-}
+	cat /proc/version
+	#./test/test-rbuf
+	#./test/test-regidx
+	REF_PATH=: ./test/test.pl --plugins --exec bgzip=$(BGZIP) --exec tabix=$(TABIX) --htsdir=$(HTSDIR) $${TEST_OPTS:-} -f test_naive_concat
 
 # test HTSlib as well, where it is built alongside BCFtools
 check-all test-all: test-htslib test
