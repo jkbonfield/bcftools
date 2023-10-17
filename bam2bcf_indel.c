@@ -32,6 +32,7 @@ DEALINGS IN THE SOFTWARE.  */
 #include <htslib/khash_str2int.h>
 #include "bam2bcf.h"
 #include "str_finder.h"
+#include "ksw.c"
 
 #include <htslib/ksort.h>
 KSORT_INIT_GENERIC(uint32_t)
@@ -482,6 +483,28 @@ static char *bcf_cgp_calc_cons(int n, int *n_plp, bam_pileup1_t **plp,
 #  define MIN(a,b) ((a)<(b)?(a):(b))
 #endif
 
+void dump(int qlen, uint8_t *qseq,
+          int rlen, uint8_t *rseq,
+          int score, int ksc, kswr_t ksw) {
+    int i;
+    printf("QRY ");
+    for (i = 0; i < qlen; i++) {
+        assert(qseq[i] >= 0 && qseq[i] < 5);
+        putchar("ACGTN"[qseq[i]]);
+    }
+
+    printf("\nQRY ");
+    for (i = 0; i < rlen; i++) {
+        assert(rseq[i] >= 0 && rseq[i] < 5);
+        putchar("ACGTN"[rseq[i]]);
+    }
+
+    printf("\nSC  %d\t%d %d\t%d\n", score, ksw.score,
+           3*(qlen-ksw.score)+ksw.qb+(qlen-ksw.qe), ksc);
+
+    printf("%d,%d..%d %d,%d..%d\n", qlen,ksw.qb,ksw.qe, rlen,ksw.tb,ksw.te);
+}
+
 // Part of bcf_call_gap_prep.
 //
 // Realign using BAQ to get an alignment score of a single read vs
@@ -531,8 +554,48 @@ static int bcf_cgp_align_score(bam_pileup1_t *p, bcf_callaux_t *bca,
 
     // The bottom 8 bits are length-normalised score while
     // the top bits are unnormalised.
-    sc = probaln_glocal(ref2 + tbeg - left, tend - tbeg + type,
-                        query, qend - qbeg, qq, &apf, 0, 0);
+
+    // use win_size as largest indel seen?
+//    sc = probaln_glocal(ref2 + tbeg - left, tend - tbeg + type,
+//                        query, qend - qbeg, qq, &apf, 0, 0);
+
+    // qq ignored
+#define M 1
+#define _ -2
+    int8_t mat[25] = {
+        M,_,_,_,0,
+        _,M,_,_,0,
+        _,_,M,_,0,
+        _,_,_,M,0,
+        0,0,0,0,0
+    };
+
+    kswr_t ksw = 
+        ksw_align(qend - qbeg, query, // query
+                  tend - tbeg + type, ref2 + tbeg - left, // target
+                  5,   // number of reside types
+                  mat, // 5 x 5 scoring,
+                  10,  // gapo,
+                  1,   // gape,
+                  KSW_XSTART,   // xtra
+                  //type + 3, // no band avail?
+                  NULL // qry
+                  );
+//    dump(qend - qbeg, query, tend - tbeg + type, ref2 + tbeg - left,
+//         sc, ksc, ksw);
+
+    // reduce score when quals are low
+    double m = 0;
+    for (l = qbeg; l < qend; l++)
+        m += qq[l-qbeg] / 30.0;
+    m /= (qend - qbeg);
+    ksw.score *= m;
+
+    // CCS: try -h 250 --indel-bias 5
+    sc =  4*((qend - qbeg)-ksw.score);          // flip & scale: high = bad
+    sc += 3*(ksw.qb+((qend - qbeg)-ksw.qe));    // penalise end gap in query
+    sc += ksw.tb+((tend - tbeg + type)-ksw.te); // penalise end gap in ref?
+
     if (sc < 0) {
         *score = 0xffffff;
         free(qq);
