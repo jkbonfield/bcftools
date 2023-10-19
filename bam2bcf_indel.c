@@ -794,8 +794,8 @@ dev     220/3   160/3   62/5   18/19   Q10 31 53 (-h500 -indel-bias 1)
 -10/2   135/4           61/6   21/17       22 53  gapo=5  gape=1 _=-3
 -10/2     3/19                                 0  gapo=2  gape=1
 */
-                seqQ   += min_q - 10;  if (seqQ   < 0) seqQ   = 0;
-                indelQ += min_q - 10;  if (indelQ < 0) indelQ = 0;
+                seqQ   += MIN(5,  min_q - 5);   if (seqQ   < 0) seqQ   = 0;
+                indelQ += MIN(5,  min_q - 10);  if (indelQ < 0) indelQ = 0;
 //                seqQ   += min_q - 7;  if (seqQ   < 0) seqQ   = 0;
 //                indelQ += min_q - 7;  if (indelQ < 0) indelQ = 0;
             }
@@ -937,6 +937,13 @@ int bcf_call_gap_prep(int n, int *n_plp, bam_pileup1_t **plp, int pos,
     bca->indelreg = 0;
     double nqual_over_60 = bca->nqual / 60.0;
 
+//    int biggest_type = 0;
+//    for (t = 0; t < n_types; ++t) {
+//        if (biggest_type < (types[t] < 0 ? -types[t] : types[t]))
+//            biggest_type = (types[t] < 0 ? -types[t] : types[t]);
+//    }
+//    //fprintf(stderr, "Biggest_type=%d win_size=%d\n", biggest_type, bca->indel_win_size);
+
     for (t = 0; t < n_types; ++t) {
         int l, ir;
 
@@ -1038,14 +1045,20 @@ int bcf_call_gap_prep(int n, int *n_plp, bam_pileup1_t **plp, int pos,
                 // determine the start and end of sequences for alignment
                 // FIXME: loops over CIGAR multiple times
                 int left2 = left, right2 = right;
+                int win_size = bca->indel_win_size;
+//                if (win_size > biggest_type * 10 + 20)
+//                    win_size = biggest_type * 10 + 20;
+////                fprintf(stderr, "Biggest_type=%d win_size=%d\n", biggest_type, win_size);
+                win_size = bca->indel_win_size;
+
                 if (p->b->core.l_qseq > 1000) {
                     // long read data needs less context.  It also tends to
                     // have many more candidate indels to investigate so
                     // speed here matters more.
-                    if (pos - left >= bca->indel_win_size)
-                        left2 += bca->indel_win_size/2;
-                    if (right-pos >= bca->indel_win_size)
-                        right2 -= bca->indel_win_size/2;
+                    if (pos - left >= win_size)
+                        left2 += win_size/2;
+                    if (right-pos >= win_size)
+                        right2 -= win_size/2;
                 }
 
                 int r_start = p->b->core.pos;
