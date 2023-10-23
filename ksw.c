@@ -631,3 +631,90 @@ int main(int argc, char *argv[])
 	return 0;
 }
 #endif
+
+#ifdef _KSW_MAIN2
+
+#include <unistd.h>
+#include <stdio.h>
+#include <string.h>
+
+unsigned char seq_nt4_table[256] = {
+	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4, 
+	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4, 
+	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4, 
+	4, 0, 4, 1,  4, 4, 4, 2,  4, 4, 4, 4,  4, 4, 4, 4, 
+	4, 4, 4, 4,  3, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4, 
+	4, 0, 4, 1,  4, 4, 4, 2,  4, 4, 4, 4,  4, 4, 4, 4, 
+	4, 4, 4, 4,  3, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4, 
+	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4, 
+	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4, 
+	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4, 
+	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4, 
+	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4, 
+	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4, 
+	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4, 
+	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4
+};
+
+int main(int argc, char *argv[])
+{
+	int c, sa = 1, sb = 3, i, j, k, forward_only = 0;
+	int8_t mat[25];
+	int gapo = 5, gape = 2, minsc = 0, xtra = KSW_XSTART;
+	uint8_t *rseq, *qseq;
+
+	// parse command line
+	while ((c = getopt(argc, argv, "a:b:o:e:ft:1")) >= 0) {
+		switch (c) {
+			case 'a': sa = atoi(optarg); break;
+			case 'b': sb = atoi(optarg); break;
+			case 'o': gapo = atoi(optarg); break;
+			case 'e': gape = atoi(optarg); break;
+			case 't': minsc = atoi(optarg); break;
+			case 'f': forward_only = 1; break;
+			case '1': xtra |= KSW_XBYTE; break;
+		}
+	}
+	if (optind + 2 > argc) {
+		fprintf(stderr, "Usage: ksw [-1] [-f] [-a%d] [-b%d] [-q%d] [-r%d] [-t%d] <target.fa> <query.fa>\n", sa, sb, gapo, gape, minsc);
+		return 1;
+	}
+	if (minsc > 0xffff) minsc = 0xffff;
+	xtra |= KSW_XSUBO | minsc;
+	// initialize scoring matrix
+	for (i = k = 0; i < 4; ++i) {
+		for (j = 0; j < 4; ++j)
+			mat[k++] = i == j? sa : -sb;
+		mat[k++] = 0; // ambiguous base
+	}
+	for (j = 0; j < 5; ++j) mat[k++] = 0;
+
+	rseq = argv[optind];   size_t rseq_l = strlen(rseq);
+	qseq = argv[optind+1]; size_t qseq_l = strlen(qseq);
+
+	char *rseq4 = malloc(rseq_l);
+	char *qseq4 = malloc(qseq_l);
+
+	for (i = 0; i < rseq_l; i++)
+		rseq4[i] = seq_nt4_table[(unsigned char)rseq[i]];
+	for (i = 0; i < qseq_l; i++)
+		qseq4[i] = seq_nt4_table[(unsigned char)qseq[i]];
+
+	kswq_t *q[2] = {0, 0};
+	kswr_t r;
+	r = ksw_align(qseq_l, qseq4, rseq_l, rseq4, 5, mat, gapo, gape, xtra, &q[0]);
+
+	printf("T 0(%d..%d)%d\n"
+	       "Q 0(%d..%d)%d\n"
+	       "sc1 %d\tsc2 %d\tte2 %d\n",
+	       r.tb, r.te+1, (int)rseq_l,
+	       r.qb, r.qe+1, (int)qseq_l,
+	       r.score, r.score2, r.te2);
+
+	free(rseq4);
+	free(qseq4);
+
+	return 0;
+}
+#endif

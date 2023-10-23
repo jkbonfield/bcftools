@@ -482,6 +482,9 @@ static char *bcf_cgp_calc_cons(int n, int *n_plp, bam_pileup1_t **plp,
 #ifndef MIN
 #  define MIN(a,b) ((a)<(b)?(a):(b))
 #endif
+#ifndef MAX
+#  define MAX(a,b) ((a)>(b)?(a):(b))
+#endif
 
 void dump(int qlen, uint8_t *qseq,
           int rlen, uint8_t *rseq,
@@ -584,17 +587,47 @@ static int bcf_cgp_align_score(bam_pileup1_t *p, bcf_callaux_t *bca,
 //    dump(qend - qbeg, query, tend - tbeg + type, ref2 + tbeg - left,
 //         sc, 0/*ksc*/, ksw);
 
-    // reduce score when quals are low
+    // Reduce score when quals are low
     double m = 0;
     for (l = qbeg; l < qend; l++)
-        m += qq[l-qbeg] / 30.0;
+        m += qq[l-qbeg];
+    m /= 30.0;
     m /= (qend - qbeg);
     ksw.score *= m;
 
-    // CCS: try -h 250 --indel-bias 5
+    // Heuristics to try and get ksw scores in the same orientation and
+    // vaguely the same scale as BAQ's probaln_glocal scores.
     sc =  4*((qend - qbeg)-ksw.score);          // flip & scale: high = bad
-    sc += 3*(ksw.qb+((qend - qbeg)-ksw.qe));    // penalise end gap in query
-    sc += ksw.tb+((tend - tbeg + type)-ksw.te); // penalise end gap in ref?
+
+    // PacBio works better with 3*, while Illumina prefers 5*.
+    // It's probably more related to SeqQ and IndelQ score heuristic later on.
+
+    // Ksw isn't glocal, so we penalise ref end gaps if and only if query
+    // goes all the way to the end.  Eg
+
+    //          01234567890123
+    // Target:  agCTTAGGgaaggc   len 14   2..8
+    // Query:     CTTAGGag       len  8   0..6
+    //            012345678      score 6; amend to 6-2mismatch
+
+    // Penalise end-gaps in query; a count of bases not included in alignment
+    // Part way between mismatch (-2) and gap (-5)
+    sc += 3*((qend-qbeg) - (ksw.qe-ksw.qb));
+
+    // This works well on PacBio, but I cnanot recall the logic behind it.
+    // It's bad on Illumina though, and doesn't seem a sensible score
+    // function, so instead we use the one below.
+
+    // Small penalty for end-gap in ref when query overhangs ref end.
+    //  Ref =============           ==============
+    //  Qry      ========---      --========
+
+    //  unaligned query      unaligned ref
+    if (qend-qbeg - ksw.qe > tend-tbeg+type - ksw.te)
+        sc += 3*((qend-qbeg - ksw.qe) - (tend-tbeg+type - ksw.te));
+    if (ksw.qb > ksw.tb)
+        sc += 3*(ksw.qb - ksw.tb);
+    //sc += ksw.tb+((tend - tbeg + type)-ksw.te);
 
     if (sc < 0) {
         *score = 0xffffff;
@@ -628,9 +661,18 @@ static int bcf_cgp_align_score(bam_pileup1_t *p, bcf_callaux_t *bca,
     //
     // This is emphasised further if the sequence ends with
     // soft clipping.
+//    double m2 = 0;
+//    int mn = 0, m2min = INT_MAX;
     DL_FOREACH_SAFE(reps, elt, tmp) {
         if (elt->start <= qpos && elt->end >= qpos) {
             iscore += (elt->end-elt->start) / elt->rep_len;  // c
+//            for (l = MAX(qbeg, elt->start);
+//                 l < MIN(qend, elt->end);
+//                 l++, mn++) {
+//                m2 += qq[l-qbeg];
+//                if (m2min > qq[l-qbeg])
+//                    m2min = qq[l-qbeg];
+//            }
             if (elt->start+tbeg <= r_start ||
                 elt->end+tbeg   >= r_end)
                 iscore += 2*(elt->end-elt->start);
@@ -639,6 +681,24 @@ static int bcf_cgp_align_score(bam_pileup1_t *p, bcf_callaux_t *bca,
         DL_DELETE(reps, elt);
         free(elt);
     }
+
+    // Skew avg STR qual vs avg base qual over entire region.
+    // So substantially around this particular variant implies questionable
+    // validity.  We're not absolute in this, as several factors can cause
+    // this, so we mitigate the reduction a little.
+//    double isc_mul = 1;
+//    if (mn)
+//        isc_mul = sqrt(m/((m2+1)/(mn+1.0)));
+//    *score = (*score & 0xff) | (((*score >> 8) * (int)isc_mul)<<8);
+
+//    fprintf(stderr, "len %d, m %f, m2 %f %f %f, m2m %d\n",
+//            qend-qbeg, m, (m2+1)/(mn+1.0), (m2+1)/(mn+1.0)/m, isc_mul, m2min);
+    // Skew by avg qual within STR
+    // Or Avg STR qual vs AVG read qual?  So substantially lower over this
+    // region than average implies suspect data?
+    //iscore *= (m2min+1)/(mn+1);
+//    if (!mn) m2min = 30;
+//    *score = (*score & 0xff) | (((*score >> 8) * (m2min+5) / 30)<<8);
 
     // Apply STR score to existing indelQ
     l  =  (*score&0xff)*.8 + iscore*2;
@@ -794,6 +854,8 @@ dev     220/3   160/3   62/5   18/19   Q10 31 53 (-h500 -indel-bias 1)
 -10/2   135/4           61/6   21/17       22 53  gapo=5  gape=1 _=-3
 -10/2     3/19                                 0  gapo=2  gape=1
 */
+                // IndelQ MIN 0 works for Illumina, MIN 5 or 10 for PB CCS?
+                // SeqQ 0 or 5 didn't seem to change much on Illumina
                 seqQ   += MIN(5,  min_q - 5);   if (seqQ   < 0) seqQ   = 0;
                 indelQ += MIN(5,  min_q - 10);  if (indelQ < 0) indelQ = 0;
 //                seqQ   += min_q - 7;  if (seqQ   < 0) seqQ   = 0;
