@@ -278,7 +278,7 @@ static int *bcf_cgp_find_types(int n, int *n_plp, bam_pileup1_t **plp,
 //         or NULL on failure.
 static char **bcf_cgp_ref_sample(int n, int *n_plp, bam_pileup1_t **plp,
                                  int pos, bcf_callaux_t *bca, const char *ref,
-                                 int left, int right) {
+                                 int left, int right, double *qavg) {
     int i, k, s, L = right - left + 1, max_i, max2_i;
     char **ref_sample; // returned
     uint32_t *cns = NULL, max, max2;
@@ -290,6 +290,7 @@ static char **bcf_cgp_ref_sample(int n, int *n_plp, bam_pileup1_t **plp,
         n = 0;
         goto err;
     }
+    size_t qsum = 0, qcount = 0, qmax = 0;
 
     // Convert ref ASCII to 0-15.
     for (i = 0; i < right - left; ++i)
@@ -313,6 +314,7 @@ static char **bcf_cgp_ref_sample(int n, int *n_plp, bam_pileup1_t **plp,
             bam1_t *b = p->b;
             uint32_t *cigar = bam_get_cigar(b);
             uint8_t *seq = bam_get_seq(b);
+            uint8_t *qual = bam_get_qual(b);
             int x = b->core.pos, y = 0;
 
             // TODO: pileup exposes pileup_ind, but we also need e.g.
@@ -333,7 +335,7 @@ static char **bcf_cgp_ref_sample(int n, int *n_plp, bam_pileup1_t **plp,
                     if (x + l >= left) {
                         j = left - x > 0 ? left - x : 0;
                         int j_end = right - x < l ? right - x : l;
-                        for (; j < j_end; j++)
+                        for (; j < j_end; j++) {
                             // Append to cns.  Note this is ref coords,
                             // so insertions aren't in cns and deletions
                             // will have lower coverage.
@@ -346,6 +348,11 @@ static char **bcf_cgp_ref_sample(int n, int *n_plp, bam_pileup1_t **plp,
                                 (bam_seqi(seq, y+j) == ref0[x+j-left])
                                 ? 1        // REF
                                 : (1<<16); // ALT
+                            qsum += qual[y+j];
+                            if (qmax < qual[y+j])
+                                qmax = qual[y+j];
+                            qcount++;
+                        }
                     }
                     x += l; y += l;
                 } else if (op == BAM_CDEL || op == BAM_CREF_SKIP) {
@@ -390,6 +397,9 @@ static char **bcf_cgp_ref_sample(int n, int *n_plp, bam_pileup1_t **plp,
         //    fputc("=ACMGRSVTWYHKDBN"[(int)r[i]], stderr);
         //fputc('\n', stderr);
     }
+
+    *qavg = (qsum+1.0)/(qcount+1.0);
+    *qavg = (*qavg + qmax)/2; // bias avg toward maximum observed.
 
     free(ref0);
     free(cns);
@@ -482,31 +492,10 @@ static char *bcf_cgp_calc_cons(int n, int *n_plp, bam_pileup1_t **plp,
 #ifndef MIN
 #  define MIN(a,b) ((a)<(b)?(a):(b))
 #endif
+
 #ifndef MAX
 #  define MAX(a,b) ((a)>(b)?(a):(b))
 #endif
-
-void dump(int qlen, uint8_t *qseq,
-          int rlen, uint8_t *rseq,
-          int score, int ksc, kswr_t ksw) {
-    int i;
-    printf("QRY ");
-    for (i = 0; i < qlen; i++) {
-        assert(qseq[i] >= 0 && qseq[i] < 5);
-        putchar("ACGTN"[qseq[i]]);
-    }
-
-    printf("\nCON ");
-    for (i = 0; i < rlen; i++) {
-        assert(rseq[i] >= 0 && rseq[i] < 5);
-        putchar("ACGTN"[rseq[i]]);
-    }
-
-    printf("\nSC  %d\t%d %d\t%d\n", score, ksw.score,
-           3*(qlen-ksw.score)+ksw.qb+(qlen-ksw.qe), ksc);
-
-    printf("%d,%d..%d %d,%d..%d\n", qlen,ksw.qb,ksw.qe, rlen,ksw.tb,ksw.te);
-}
 
 // Part of bcf_call_gap_prep.
 //
@@ -516,6 +505,9 @@ void dump(int qlen, uint8_t *qseq,
 // Fills out score
 // Returns 0 on success,
 //        <0 on error
+
+// TODO: have score_BAQ and score_ksw variants and make them selectable
+// via e.g. --indel-ksw.  This impacts elsewhere too.
 static int bcf_cgp_align_score(bam_pileup1_t *p, bcf_callaux_t *bca,
                                int type, uint8_t *ref2, uint8_t *query,
                                int r_start, int r_end, int long_read,
@@ -523,7 +515,7 @@ static int bcf_cgp_align_score(bam_pileup1_t *p, bcf_callaux_t *bca,
                                int left, int right,
                                int qbeg, int qend,
                                int qpos, int max_deletion,
-                               int *score) {
+                               double qavg, int *score) {
     // Illumina
 //    probaln_par_t apf = { 1e-4, 1e-2, 10 };
 
@@ -584,16 +576,71 @@ static int bcf_cgp_align_score(bam_pileup1_t *p, bcf_callaux_t *bca,
                   //type + 3, // no band avail?
                   NULL // qry
                   );
-//    dump(qend - qbeg, query, tend - tbeg + type, ref2 + tbeg - left,
-//         sc, 0/*ksc*/, ksw);
 
-    // Reduce score when quals are low
+    rep_ele *reps, *elt, *tmp;
+    uint8_t *seg = ref2 + tbeg - left;
+    int seg_len = tend - tbeg + type;
+
+    // Note: although seg moves (tbeg varies), ref2 is reused many times
+    // so we could factor out some find_STR calls.  However it's not the
+    // bottleneck for now.
+
+    // FIXME: need to make this work on IUPAC?
+    reps = find_STR((char *)seg, seg_len, 0);
+    int iscore = 0;
+
+    // Identify STRs in ref covering the indel up to
+    // (or close to) the end of the sequence.
+    // Those having an indel and right at the sequence
+    // end do not confirm the total length of indel
+    // size.  Specifically a *lack* of indel at the
+    // end, where we know indels occur in other
+    // sequences, is a possible reference bias.
+    //
+    // This is emphasised further if the sequence ends with
+    // soft clipping.
+    double m2 = 0;
+    int mn = 0, m2min = INT_MAX;
+    DL_FOREACH_SAFE(reps, elt, tmp) {
+        if (elt->start <= qpos && elt->end >= qpos) {
+            iscore += (elt->end-elt->start) / elt->rep_len;  // c
+            for (l = MAX(qbeg, elt->start);
+                 l < MIN(qend, elt->end);
+                 l++, mn++) {
+                m2 += qq[l-qbeg];
+                if (m2min > qq[l-qbeg])
+                    m2min = qq[l-qbeg];
+            }
+            if (elt->start+tbeg <= r_start ||
+                elt->end+tbeg   >= r_end)
+                iscore += 2*(elt->end-elt->start);
+       }
+
+        DL_DELETE(reps, elt);
+        free(elt);
+    }
+
+
+    if (mn)
+        m2 /= mn;
+    else
+        m2 = m2min = qavg;
+
     double m = 0;
     for (l = qbeg; l < qend; l++)
         m += qq[l-qbeg];
-    m /= 30.0;
-    m /= (qend - qbeg);
-    ksw.score *= m;
+    m /= (qend - qbeg); // avg qual
+
+    // mn    = avg qual in STRs overlapping pos
+    // m2min = min qual in STRs overlapping pos
+    // m     = avg qual in wider region qbeg to qend
+
+    // Skew alignment score by higher or lower than some middling avg qual
+    // Low ksw.score = bad, high = good
+
+    //fprintf(stderr, "qavg %f m %f m2 %f\n", qavg, m, m2);
+    //fprintf(stderr, "%f %f %f\n", (m/30) / (m2/30), m, m2);
+    ksw.score *= m/30.0;
 
     // Heuristics to try and get ksw scores in the same orientation and
     // vaguely the same scale as BAQ's probaln_glocal scores.
@@ -627,82 +674,28 @@ static int bcf_cgp_align_score(bam_pileup1_t *p, bcf_callaux_t *bca,
         sc += 3*((qend-qbeg - ksw.qe) - (tend-tbeg+type - ksw.te));
     if (ksw.qb > ksw.tb)
         sc += 3*(ksw.qb - ksw.tb);
-    //sc += ksw.tb+((tend - tbeg + type)-ksw.te);
 
+    // Sc is overall alignment score, in top 24 bits (SeqQ). It's based
+    // purely on the scores for the whole alignment.
+    // We also have a separate indel score in bottom 8 bits (IndelQ).
+    // This is a function of all sorts of attributes of the candidate indel
+    // itself, such as STR length and the presence of poor quality bases.
     if (sc < 0) {
         *score = 0xffffff;
         free(qq);
         return 0;
     }
 
-    // used for adjusting indelQ below
-    l = (int)(100. * sc / (qend - qbeg) + .499) * bca->indel_bias;
-    *score = sc<<8 | MIN(255, l);
+    // Used for adjusting indelQ below.  Lower l is more likely to call
+    // (--FN, ++FP).  (NB CLI --indel_bias is 1/indel_bias var).
+    // Starts as average score per base, and then adjusted based on seq
+    // complexity / quality.
+    l = .5*(100. * sc / (qend - qbeg) + .499);
+    l += iscore*(qavg/(m2min+1.0) + qavg/m2);
 
-    rep_ele *reps, *elt, *tmp;
-    uint8_t *seg = ref2 + tbeg - left;
-    int seg_len = tend - tbeg + type;
-
-    // Note: although seg moves (tbeg varies), ref2 is reused many times
-    // so we could factor out some find_STR calls.  However it's not the
-    // bottleneck for now.
-
-    // FIXME: need to make this work on IUPAC.
-    reps = find_STR((char *)seg, seg_len, 0);
-    int iscore = 0;
-
-    // Identify STRs in ref covering the indel up to
-    // (or close to) the end of the sequence.
-    // Those having an indel and right at the sequence
-    // end do not confirm the total length of indel
-    // size.  Specifically a *lack* of indel at the
-    // end, where we know indels occur in other
-    // sequences, is a possible reference bias.
-    //
-    // This is emphasised further if the sequence ends with
-    // soft clipping.
-//    double m2 = 0;
-//    int mn = 0, m2min = INT_MAX;
-    DL_FOREACH_SAFE(reps, elt, tmp) {
-        if (elt->start <= qpos && elt->end >= qpos) {
-            iscore += (elt->end-elt->start) / elt->rep_len;  // c
-//            for (l = MAX(qbeg, elt->start);
-//                 l < MIN(qend, elt->end);
-//                 l++, mn++) {
-//                m2 += qq[l-qbeg];
-//                if (m2min > qq[l-qbeg])
-//                    m2min = qq[l-qbeg];
-//            }
-            if (elt->start+tbeg <= r_start ||
-                elt->end+tbeg   >= r_end)
-                iscore += 2*(elt->end-elt->start);
-       }
-
-        DL_DELETE(reps, elt);
-        free(elt);
-    }
-
-    // Skew avg STR qual vs avg base qual over entire region.
-    // So substantially around this particular variant implies questionable
-    // validity.  We're not absolute in this, as several factors can cause
-    // this, so we mitigate the reduction a little.
-//    double isc_mul = 1;
-//    if (mn)
-//        isc_mul = sqrt(m/((m2+1)/(mn+1.0)));
-//    *score = (*score & 0xff) | (((*score >> 8) * (int)isc_mul)<<8);
-
-//    fprintf(stderr, "len %d, m %f, m2 %f %f %f, m2m %d\n",
-//            qend-qbeg, m, (m2+1)/(mn+1.0), (m2+1)/(mn+1.0)/m, isc_mul, m2min);
-    // Skew by avg qual within STR
-    // Or Avg STR qual vs AVG read qual?  So substantially lower over this
-    // region than average implies suspect data?
-    //iscore *= (m2min+1)/(mn+1);
-//    if (!mn) m2min = 30;
-//    *score = (*score & 0xff) | (((*score >> 8) * (m2min+5) / 30)<<8);
-
-    // Apply STR score to existing indelQ
-    l  =  (*score&0xff)*.8 + iscore*2;
-    *score = (*score & ~0xff) | MIN(255, l);
+    // /10 as ksw scoring is very different to BAQ, so we rescale to try
+    // and keep a similar meaning to the --indel-bias parameter.
+    *score = (sc<<8) | (int)MIN(255, l * bca->indel_bias/10);
 
     free(qq);
 
@@ -717,10 +710,11 @@ static int bcf_cgp_compute_indelQ(int n, int *n_plp, bam_pileup1_t **plp,
                                   bcf_callaux_t *bca, char *inscns,
                                   int l_run, int max_ins,
                                   int ref_type, int *types, int n_types,
-                                  int *score) {
+                                  int *score, double qavg) {
     // FIXME: n_types has a maximum; no need to alloc - use a #define?
     int sc[MAX_TYPES], sumq[MAX_TYPES], s, i, j, t, K, n_alt, tmp;
     memset(sumq, 0, n_types * sizeof(int));
+
     for (s = K = 0; s < n; ++s) {
         for (i = 0; i < n_plp[s]; ++i, ++K) {
             bam_pileup1_t *p = plp[s] + i;
@@ -856,15 +850,31 @@ dev     220/3   160/3   62/5   18/19   Q10 31 53 (-h500 -indel-bias 1)
 */
                 // IndelQ MIN 0 works for Illumina, MIN 5 or 10 for PB CCS?
                 // SeqQ 0 or 5 didn't seem to change much on Illumina
-                seqQ   += MIN(5,  min_q - 5);   if (seqQ   < 0) seqQ   = 0;
-                indelQ += MIN(5,  min_q - 10);  if (indelQ < 0) indelQ = 0;
+//                seqQ   += MIN(5,  min_q - 5);   if (seqQ   < 0) seqQ   = 0;
+//                indelQ += MIN(5,  min_q - 10);  if (indelQ < 0) indelQ = 0;
+
+                //fprintf(stderr, "seqQ %d indelQ %d min_q %d qavg %f\n", seqQ, indelQ, min_q, qavg);
+//                seqQ   += MIN(0,  min_q - 5);   if (seqQ   < 0) seqQ   = 0;
+//                indelQ += MIN(0,  min_q - 10);  if (indelQ < 0) indelQ = 0;
+
+                seqQ   += MIN(qavg/20,  min_q - qavg/10);
+                indelQ += MIN(qavg/20,  min_q - qavg/5);
+
+                if (seqQ   < 0) seqQ   = 0;
+                if (indelQ < 0) indelQ = 0;
 //                seqQ   += min_q - 7;  if (seqQ   < 0) seqQ   = 0;
 //                indelQ += min_q - 7;  if (indelQ < 0) indelQ = 0;
             }
 
             tmp = sc[0]>>6 & 0xff;
             // reduce indelQ
-            indelQ = tmp > 111? 0 : (int)((1. - tmp/111.) * indelQ + .499);
+            //indelQ = tmp > 166? 0 : (int)((1.5 - tmp/111.) * indelQ + .499);
+            //indelQ = tmp > 122? 0 : (int)((1.2 - tmp/111.) * indelQ + .499);
+            indelQ = tmp > 111? 0 : (int)((1 - tmp/111.) * indelQ + .499);
+
+            // 166?:1.5-tmp/111 is just the same as indelQ *= 1.5 ???
+            // Maybe also indelQ * --indel-bias param here?
+            // Or indelQ *= qavg/40?  Harsh?
 
             // Doesn't really help accuracy, but permits -h to take
             // affect still.
@@ -977,7 +987,9 @@ int bcf_call_gap_prep(int n, int *n_plp, bam_pileup1_t **plp, int pos,
      *
      * Masks mismatches present in at least 70% of the reads with 'N'.
      */
-    ref_sample = bcf_cgp_ref_sample(n, n_plp, plp, pos, bca, ref, left, right);
+    double qavg = 30; // average base qual over all reads in this region
+    ref_sample = bcf_cgp_ref_sample(n, n_plp, plp, pos, bca, ref, left, right,
+                                    &qavg);
 
     // The length of the homopolymer run around the current position
     l_run = bcf_cgp_l_run(ref, pos);
@@ -1156,7 +1168,7 @@ int bcf_call_gap_prep(int n, int *n_plp, bam_pileup1_t **plp, int pos,
                                             r_start, r_end, long_read,
                                             tbeg, tend, left2, right2,
                                             qbeg, qend, qpos, max_deletion,
-                                            &score[K*n_types + t]) < 0) {
+                                            qavg, &score[K*n_types + t]) < 0) {
                         score[K*n_types + t] = 0xffffff;
                         return -1;
                     }
@@ -1183,7 +1195,7 @@ int bcf_call_gap_prep(int n, int *n_plp, bam_pileup1_t **plp, int pos,
 
     // compute indelQ
     n_alt = bcf_cgp_compute_indelQ(n, n_plp, plp, bca, inscns, l_run, max_ins,
-                                   ref_type, types, n_types, score);
+                                   ref_type, types, n_types, score, qavg);
 
     // free
     free(ref2);
