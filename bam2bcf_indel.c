@@ -764,120 +764,21 @@ static int bcf_cgp_compute_indelQ(int n, int *n_plp, bam_pileup1_t **plp,
                     if (bam_seqi(seq, l) != base)
                         break;
                 }
-//                printf("INDELQ\t%d\t", min_q);
-//                for (l=MAX(0,qpos-5); l<=MIN(p->b->core.l_qseq, qpos+5); l++) {
-//                    printf("%c%2d ", seq_nt16_str[bam_seqi(seq, l)], qual[l]);
-//                }
-//                printf("\n");
-
-                // Guesswork.  However lower seqQ means less trust-worthy, so
-                // we reduce for qual < 10 and increase for qual > 10.
-//                fprintf(stderr, "INDELQ\t%d\t%d\n", min_q, seqQ);
-/* min_q/X, and --indel-bias Y.  FP/FN figures
-SeqQ and IndelQ
-dev     220/3   160/3   67/5   22/18
-ksw,2   378/4   160/6   69/19  21/27 (-h250)
-ksw,2   456/4   164/14  67/21  22/29 (-h500)
-/10,2   258/6   178/8   64/13  29/19
-/10,10  268/6   156/7   66/11  30/18
-
-SeqQ only
-dev     220/3   160/3   67/5   22/18
-/10,10  255/6   157/8   66/14  28/18
-
-IndelQ only
-dev     220/3   160/3   67/5   22/18
-/10,10  212/6   161/6   67/16  22/28
-*/
-//                seqQ   *= MIN(min_q / 10.0, 2);
-//                indelQ *= MIN(min_q / 10.0, 2);
-
-/* min_q - X, and --indel-bias Y.  FP/FN figures
-dev     220/3   160/3   67/5   22/18
-ksw/2   378/4   160/6   62/19  21/27 -h250
--10     336/4           75/14
--10/2   376/2   166/6   67/13  27/20 ?
--10/5   392/2   162/5   67/12  28/19 ?
--10/10  394/2   222/3   67/12  28/19 ?
--15     186/7           66/10  21/18
--15/10  211/5   156/6   66/10  23/18
--15/20  212/5   156/6   66/10  23/18
-
-With -h250 --indel-bias 2
--10     270/4   163/6   61/13  19/21 seqQ only Q14 42 80
--10     371/2   163/6   61/18  22/27 indelQ only; Q22 47 75
--10     280/3   164/4   60/11  21/21 seqQ+indelQ; Q16 45 80 <-- best new?
-
-With -h200 --indel-bias ?
--10/2   190/5   160/5   61/17  21/26 seqQ+indelQ; Q6 33 72
--10/5   205/5   160/5   60/14  21/27  Q7 33 72
-
-With -h500 --indel-bias ?
-dev     220/3   160/3   62/5    18/19  Q10 31 53 (-h500 -indel-bias 1)
--10/2   175/5    89/5   57/9    19/16  Q22 30 62  gapo=5  gape=1
--10/3   191/3   162/3   61-41/9 19/16  Q7  43 64  gapo=5  gape=1 <<<
--10/5   210/3   153/5   61/9    20/15  Q10 33 65  gapo=5  gape=1
-
-With -h300 --indel-bias ?
-dev     220/3   160/3   62/5   18/19  Q10 31 53 (-h500 -indel-bias 1)
--10/1   292/5   162/5   59/11  19/21  Q20 54 88
--10/1.5 320/4   160/6   58/12  22/23  Q23 59 98
--10/2   320/3   159/6   61/13  20/25  Q24 61 101
--10/1   129/6           57/9   21/17      22 47   gapo=5  gape=1
--10/1.5 150/5           58/9   20/15      27 55   gapo=5  gape=1
--10/2   157/4           58/9   21/16      28 59   gapo=5  gape=1 <<<
--10/5   184/4           58/8   19/16      33 65   gapo=5  gape=1 <<<
--7/5    296/4   161/4   49/9   21/18   19 60 88   gapo=5  gape=1
-
-With -h250 --indel-bias 2  gaopo=? gape=?
-dev     220/3   160/3   62/5   18/19   Q10 31 53 (-h500 -indel-bias 1)
--10/2   280/3   164/4   60/11  21/21   Q16 45 80  gapo=10 gape=1
--10/2   284/3   166/4   57/10  22/21   Q16 48 82  gapo=10 gape=2
--10/2   297/4   160/7   59/12  21/21   Q18 48 82  gapo=15 gape=2
--10/2   260/4   156/5   62/11  19/20   Q14 41 78  gapo=7  gape=1
--10/2   203/4   164/4   54/10  20/22   Q7  40 68  gapo=6  gape=1 <<
--7/2    329/3   162/5   58/11  19/22   Q23 58 95  gapo=6  gape=1
--10/2   206/3   160/3   59/11  18/20   Q9  40 75  gapo=5  gape=2 <<
--7/2    332/3   157/3   59/11  19/23   Q24 60 107 gapo=5  gape=2 <
--10/2   136/4           61/6   21/16       22 53  gapo=5  gape=1 <<<
--10/3   149/4           59/7   20/15       25 55  gapo=5  gape=1 <<<
--10/5   161/4   129/4   56/8   18/16   Q6  29 60  gapo=5  gape=1 <<<
--7/2    234/4   128/4   60/8   19/18   Q17 40 76  gapo=5  gape=1 <<<
--10/2   142/3           64/7   20/16       25 60  gapo=4  gape=2 <<< 
--5/2    309/4   148/4   58/10  20/20   Q24 55 95  gapo=5  gape=1 <<
--10/2   135/4           61/6   21/17       22 53  gapo=5  gape=1 _=-3
--10/2     3/19                                 0  gapo=2  gape=1
-*/
-                // IndelQ MIN 0 works for Illumina, MIN 5 or 10 for PB CCS?
-                // SeqQ 0 or 5 didn't seem to change much on Illumina
-//                seqQ   += MIN(5,  min_q - 5);   if (seqQ   < 0) seqQ   = 0;
-//                indelQ += MIN(5,  min_q - 10);  if (indelQ < 0) indelQ = 0;
-
-                //fprintf(stderr, "seqQ %d indelQ %d min_q %d qavg %f\n", seqQ, indelQ, min_q, qavg);
-//                seqQ   += MIN(0,  min_q - 5);   if (seqQ   < 0) seqQ   = 0;
-//                indelQ += MIN(0,  min_q - 10);  if (indelQ < 0) indelQ = 0;
 
                 seqQ   += MIN(qavg/20,  min_q - qavg/10);
                 indelQ += MIN(qavg/20,  min_q - qavg/5);
 
                 if (seqQ   < 0) seqQ   = 0;
                 if (indelQ < 0) indelQ = 0;
-//                seqQ   += min_q - 7;  if (seqQ   < 0) seqQ   = 0;
-//                indelQ += min_q - 7;  if (indelQ < 0) indelQ = 0;
             }
 
             tmp = sc[0]>>6 & 0xff;
+
             // reduce indelQ
             //indelQ = tmp > 166? 0 : (int)((1.5 - tmp/111.) * indelQ + .499);
             //indelQ = tmp > 122? 0 : (int)((1.2 - tmp/111.) * indelQ + .499);
             indelQ = tmp > 111? 0 : (int)((1 - tmp/111.) * indelQ + .499);
 
-            // 166?:1.5-tmp/111 is just the same as indelQ *= 1.5 ???
-            // Maybe also indelQ * --indel-bias param here?
-            // Or indelQ *= qavg/40?  Harsh?
-
-            // Doesn't really help accuracy, but permits -h to take
-            // affect still.
             if (indelQ > seqQ) indelQ = seqQ;
             if (indelQ > 255) indelQ = 255;
             if (seqQ > 255) seqQ = 255;
