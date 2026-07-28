@@ -20,13 +20,12 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           submodules: true
-          fetch-depth: 1
+          fetch-depth: 3
 
       - name: Clone htslib
         run: |
           git config --global --add safe.directory `pwd`
-          htslib_pr=`git log -2 --format='%s' | sed -n 's/.*htslib#\([0-9]*\).*/\1/p'`
-          .ci_helpers/clone ${GITHUB_REPOSITORY_OWNER} htslib htslib ${GITHUB_HEAD_REF:-$GITHUB_REF_NAME} $htslib_pr
+          .ci_helpers/clone ${GITHUB_REPOSITORY_OWNER} htslib htslib ${GITHUB_HEAD_REF:-$GITHUB_REF_NAME} ${{ github.sha }}
 
       - name: Setup VM
         # This is vmactions/freebsd-vm@@v1.5.2
@@ -37,6 +36,7 @@ jobs:
           #arch: ${{ matrix.arch }}
           usesh: true
           cpu: 4
+          cache-after-prepare: true
           prepare: |
             pkg update
             pkg install -y autoconf automake bash curl bzip2 gmake libdeflate perl5 git
@@ -52,7 +52,7 @@ jobs:
       - name: Build
         shell: freebsd {0}
         run: |
-          gmake -j5
+          gmake -k -j5
 
       - name: Test
         shell: freebsd {0}
@@ -71,14 +71,13 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           submodules: true
-          fetch-depth: 1
+          fetch-depth: 3
 
       - name: Clone htslib
         run: |
           git config --global --add safe.directory `pwd`
           mkdir -p htslib
-          htslib_pr=`git log -2 --format='%s' | sed -n 's/.*htslib#\([0-9]*\).*/\1/p'`
-          .ci_helpers/clone ${GITHUB_REPOSITORY_OWNER} htslib htslib ${GITHUB_HEAD_REF:-$GITHUB_REF_NAME} $htslib_pr
+          .ci_helpers/clone ${GITHUB_REPOSITORY_OWNER} htslib htslib ${GITHUB_HEAD_REF:-$GITHUB_REF_NAME} ${{ github.sha }}
 
       - name: Setup VM
         # This is vmactions/openbsd-vm@v1.4.5
@@ -86,6 +85,7 @@ jobs:
         with:
           usesh: true
           cpu: 4
+          cache-after-prepare: true
           prepare: |
             pkg_add autoconf-2.71p0 automake-1.18.1 bash bzip2 curl gmake libdeflate xz git
 
@@ -102,7 +102,7 @@ jobs:
       - name: Build
         shell: openbsd {0}
         run: |
-          gmake -j5
+          gmake -k -j5
 
       - name: Test
         shell: openbsd {0}
@@ -122,14 +122,13 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           submodules: true
-          fetch-depth: 1
+          fetch-depth: 3
 
       - name: Clone htslib
         run: |
           git config --global --add safe.directory `pwd`
           mkdir -p htslib
-          htslib_pr=`git log -2 --format='%s' | sed -n 's/.*htslib#\([0-9]*\).*/\1/p'`
-          .ci_helpers/clone ${GITHUB_REPOSITORY_OWNER} htslib htslib ${GITHUB_HEAD_REF:-$GITHUB_REF_NAME} $htslib_pr
+          .ci_helpers/clone ${GITHUB_REPOSITORY_OWNER} htslib htslib ${GITHUB_HEAD_REF:-$GITHUB_REF_NAME} ${{ github.sha }}
 
       - name: Setup VM
         # This is vmactions/solaris-vm@v1.3.8
@@ -138,6 +137,7 @@ jobs:
           release: "11.4-clang-19"
           usesh: true
           cpu: 4
+          cache-after-prepare: true
           prepare: |
             pkg install autoconf automake bash curl bzip2 git
 
@@ -147,14 +147,12 @@ jobs:
         run: |
           (cd htslib; autoreconf -i)
           autoreconf -i
-          # -Wno-char-subscripts turns off errors such as phase.c:460, which are
-          # false alarms anyway.
-          ./configure --enable-werror CFLAGS="-g -O3 -Wno-char-subscripts"
+          ./configure --enable-werror CFLAGS="-g -O3"
 
       - name: Build
         shell: solaris {0}
         run: |
-          gmake -j5
+          gmake -k -j5
 
       - name: Test
         shell: solaris {0}
