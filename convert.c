@@ -627,7 +627,7 @@ static void process_iupac_gt(convert_t *convert, bcf1_t *line, fmt_t *fmt, int i
     }
 
     static const char iupac[4][4] = { {'A','M','R','W'},{'M','C','S','Y'},{'R','S','G','K'},{'W','Y','K','T'} };
-    int8_t *dat = (int8_t*)convert->dat;
+    uint8_t *dat = (uint8_t*)convert->dat;
 
     int8_t *x = (int8_t*)(fmt->fmt->p + isample*fmt->fmt->size); // FIXME: does not work with n_alt >= 64
     int l = 0;

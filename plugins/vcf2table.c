@@ -1063,7 +1063,7 @@ bcf1_t* process(bcf1_t* v) {
     for (i = 0; i < infos->size; i++) {
       unsigned int j;
       const char* info = StringListAt(infos, i);
-      char* eq = strchr(info, '=');
+      const char* eq = strchr(info, '=');
       if (eq == NULL || eq == info) continue;
       /* split multiple values for this info using commas */
       StringListPtr values = StringListMake(eq + 1, ',');

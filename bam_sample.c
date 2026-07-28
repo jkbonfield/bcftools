@@ -169,7 +169,7 @@ int bam_smpl_add_bam(bam_smpl_t *bsmpl, char *bam_hdr, const char *fname)
     const char *p = bam_hdr, *q, *r;
     while (p != NULL && (q = strstr(p, "@RG")) != 0)
     {
-        char *eol = strchr(q + 3, '\n');
+        const char *eol = strchr(q + 3, '\n');
         if (q > bam_hdr && *(q - 1) != '\n') { // @RG must be at start of line
             p = eol;
             continue;
